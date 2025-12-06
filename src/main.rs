@@ -4,7 +4,7 @@ use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{HotKey, Modifiers},
 };
-use gpui::{App, AppContext, Application, AsyncApp};
+use gpui::{App, AppContext, Application, AsyncApp, KeyBinding};
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::MainThreadMarker;
 

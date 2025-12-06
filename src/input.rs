@@ -44,6 +44,22 @@ pub struct TextInput {
 
 impl TextInput {
     pub fn new(cx: &mut App) -> Self {
+        cx.bind_keys([
+            KeyBinding::new("backspace", Backspace, Some("TextInput")),
+            KeyBinding::new("delete", Delete, Some("TextInput")),
+            KeyBinding::new("left", Left, Some("TextInput")),
+            KeyBinding::new("right", Right, Some("TextInput")),
+            KeyBinding::new("shift-left", SelectLeft, Some("TextInput")),
+            KeyBinding::new("shift-right", SelectRight, Some("TextInput")),
+            KeyBinding::new("cmd-a", SelectAll, Some("TextInput")),
+            KeyBinding::new("home", Home, Some("TextInput")),
+            KeyBinding::new("end", End, Some("TextInput")),
+            KeyBinding::new("cmd-c", Copy, Some("TextInput")),
+            KeyBinding::new("cmd-v", Paste, Some("TextInput")),
+            KeyBinding::new("cmd-x", Cut, Some("TextInput")),
+            KeyBinding::new("cmd-ctrl-space", ShowCharacterPalette, Some("TextInput")),
+        ]);
+
         Self {
             focus_handle: cx.focus_handle(),
             content: SharedString::new(""),
