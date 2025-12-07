@@ -4,9 +4,9 @@ use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, Keystroke,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
-    WindowOptions, actions, black, div, fill, hsla, opaque_grey, point, prelude::*, px, relative,
-    rgb, rgba, size, white, yellow,
+    ScrollHandle, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
+    WindowBounds, WindowOptions, actions, black, div, fill, hsla, opaque_grey, point, prelude::*,
+    px, relative, rgb, rgba, size, white, yellow,
 };
 use unicode_segmentation::*;
 
@@ -32,6 +32,7 @@ actions!(
 
 pub struct TextInput {
     focus_handle: FocusHandle,
+    scroll_handle: ScrollHandle,
     content: SharedString,
     placeholder: SharedString,
     selected_range: Range<usize>,
@@ -62,6 +63,7 @@ impl TextInput {
 
         Self {
             focus_handle: cx.focus_handle(),
+            scroll_handle: ScrollHandle::new(),
             content: SharedString::new(""),
             placeholder: SharedString::new("Halcyon"),
             selected_range: 0..0,
@@ -73,19 +75,44 @@ impl TextInput {
         }
     }
 
-    fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_range.is_empty() {
-            self.move_to(self.previous_boundary(self.cursor_offset()), cx);
-        } else {
-            self.move_to(self.selected_range.start, cx)
+    fn scroll_to_cursor(&mut self, window: &mut Window) {
+        let line = match self.last_layout.clone() {
+            Some(line) => line,
+            None => return,
+        };
+        let cursor = self.cursor_offset();
+        let cursor_pos = line.x_for_index(cursor);
+        let scroll_offset = self.scroll_handle.offset();
+        let scroll_x = -scroll_offset.x;
+        let visible_width = window.bounds().size.width - px(50.);
+
+        // If cursor is past the right edge of visible area
+        if cursor_pos > scroll_x + visible_width {
+            // Scroll right to bring cursor into view
+            let new_scroll = cursor_pos - visible_width + px(20.);
+            self.scroll_handle.set_offset(point(-new_scroll, px(0.)));
+            println!("a");
+        }
+        // If cursor is before the left edge
+        else if cursor_pos < scroll_x {
+            self.scroll_handle.set_offset(point(cursor_pos, px(0.)));
+            println!("b");
         }
     }
 
-    fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
+    fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
-            self.move_to(self.next_boundary(self.selected_range.end), cx);
+            self.move_to(self.previous_boundary(self.cursor_offset()), window, cx);
         } else {
-            self.move_to(self.selected_range.end, cx)
+            self.move_to(self.selected_range.start, window, cx)
+        }
+    }
+
+    fn right(&mut self, _: &Right, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_range.is_empty() {
+            self.move_to(self.next_boundary(self.selected_range.end), window, cx);
+        } else {
+            self.move_to(self.selected_range.end, window, cx)
         }
     }
 
@@ -97,17 +124,17 @@ impl TextInput {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(0, cx);
+    fn select_all(&mut self, _: &SelectAll, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(0, window, cx);
         self.select_to(self.content.len(), cx)
     }
 
-    fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(0, cx);
+    fn home(&mut self, _: &Home, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(0, window, cx);
     }
 
-    fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.content.len(), cx);
+    fn end(&mut self, _: &End, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.content.len(), window, cx);
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -127,7 +154,7 @@ impl TextInput {
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.is_selecting = true;
@@ -135,7 +162,7 @@ impl TextInput {
         if event.modifiers.shift {
             self.select_to(self.index_for_mouse_position(event.position), cx);
         } else {
-            self.move_to(self.index_for_mouse_position(event.position), cx)
+            self.move_to(self.index_for_mouse_position(event.position), window, cx)
         }
     }
 
@@ -180,8 +207,9 @@ impl TextInput {
         }
     }
 
-    fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+    fn move_to(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
+        self.scroll_to_cursor(window);
         cx.notify()
     }
 
@@ -331,7 +359,7 @@ impl EntityInputHandler for TextInput {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let range = range_utf16
@@ -345,6 +373,7 @@ impl EntityInputHandler for TextInput {
                 .into();
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range.take();
+        self.scroll_to_cursor(window);
         cx.notify();
     }
 
@@ -434,7 +463,7 @@ impl IntoElement for TextElement {
 }
 
 impl Element for TextElement {
-    type RequestLayoutState = ();
+    type RequestLayoutState = ShapedLine;
     type PrepaintState = PrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -452,26 +481,12 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = window.line_height().into();
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
+        // shape the text here to get width for scrolling
         let input = self.input.read(cx);
         let content = input.content.clone();
-        let selected_range = input.selected_range.clone();
-        let cursor = input.cursor_offset();
+
         let style = window.text_style();
+        let font_size = style.font_size.to_pixels(window.rem_size());
 
         let (display_text, text_color) = if content.is_empty() {
             (input.placeholder.clone(), hsla(0., 0., 0., 0.2))
@@ -514,10 +529,30 @@ impl Element for TextElement {
             vec![run]
         };
 
-        let font_size = style.font_size.to_pixels(window.rem_size());
         let line = window
             .text_system()
             .shape_line(display_text, font_size, &runs, None);
+
+        let mut style = Style::default();
+        style.size.width = line.width.into(); // actual width of the text
+        style.size.height = window.line_height().into();
+        (window.request_layout(style, [], cx), line)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let input = self.input.read(cx);
+        let selected_range = input.selected_range.clone();
+        let cursor = input.cursor_offset();
+
+        let line = _request_layout;
 
         let cursor_pos = line.x_for_index(cursor);
         let (selection, cursor) = if selected_range.is_empty() {
@@ -550,7 +585,7 @@ impl Element for TextElement {
             )
         };
         PrepaintState {
-            line: Some(line),
+            line: Some(line.clone()),
             cursor,
             selection,
         }
@@ -618,10 +653,12 @@ impl Render for TextInput {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .line_height(px(30.))
             .text_size(px(24.))
+            .id("TextInput")
+            .track_scroll(&self.scroll_handle.clone())
+            .overflow_x_scroll()
             .child(
                 div()
                     .h(px(30. + 4. * 2.))
-                    .w_full()
                     .p(px(4.))
                     .child(TextElement { input: cx.entity() }),
             )
