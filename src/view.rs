@@ -33,13 +33,16 @@ impl View {
                             cx.background_executor()
                                 .timer(Duration::from_millis(500))
                                 .await;
-                            this.update(&mut cx, |input, cx| {
+
+                            match this.update(&mut cx, |input, cx| {
                                 if epoch == input.blink_epoch {
                                     input.toggle_cursor();
                                     cx.notify();
                                 }
-                            })
-                            .unwrap();
+                            }) {
+                                Ok(_) => {}
+                                Err(_) => break,
+                            }
                         }
                     }
                 })
