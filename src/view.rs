@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    KeystrokeEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled,
-    Window, div, hsla,
+    App, AppContext, AsyncApp, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, KeystrokeEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement,
+    Styled, WeakEntity, Window, div, hsla,
 };
 
 use crate::input::TextInput;
@@ -19,7 +21,31 @@ impl View {
             cur_idx: 0,
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
-            input: cx.new(|cx| TextInput::new(cx)),
+            input: cx.new(|cx| {
+                let input = TextInput::new(cx);
+                cx.spawn(|this: WeakEntity<TextInput>, cx: &mut AsyncApp| {
+                    let mut cx = cx.clone();
+                    async move {
+                        loop {
+                            let epoch = this
+                                .update(&mut cx, |input, _| input.blink_epoch)
+                                .unwrap_or(0);
+                            cx.background_executor()
+                                .timer(Duration::from_millis(500))
+                                .await;
+                            this.update(&mut cx, |input, cx| {
+                                if epoch == input.blink_epoch {
+                                    input.toggle_cursor();
+                                    cx.notify();
+                                }
+                            })
+                            .unwrap();
+                        }
+                    }
+                })
+                .detach();
+                input
+            }),
         }
     }
 

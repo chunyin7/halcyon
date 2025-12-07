@@ -1,12 +1,12 @@
-use std::ops::Range;
+use std::{ops::Range, time::Duration};
 
 use gpui::{
-    App, Application, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, Keystroke,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ScrollHandle, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
-    WindowBounds, WindowOptions, actions, black, div, fill, hsla, opaque_grey, point, prelude::*,
-    px, relative, rgb, rgba, size, white, yellow,
+    App, Application, AsyncApp, Bounds, ClipboardItem, Context, CursorStyle, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, Keystroke, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, ScrollHandle, ShapedLine, SharedString, Style, TextRun,
+    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions, actions, black, div, fill,
+    hsla, opaque_grey, point, prelude::*, px, relative, rgb, rgba, size, white, yellow,
 };
 use unicode_segmentation::*;
 
@@ -30,6 +30,7 @@ actions!(
     ]
 );
 
+#[derive(Clone)]
 pub struct TextInput {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
@@ -41,6 +42,8 @@ pub struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    cursor_visible: bool,
+    pub blink_epoch: u32,
 }
 
 impl TextInput {
@@ -72,7 +75,18 @@ impl TextInput {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
+            cursor_visible: true,
+            blink_epoch: 0,
         }
+    }
+
+    pub fn toggle_cursor(&mut self) {
+        self.cursor_visible = !self.cursor_visible;
+    }
+
+    fn pause_blink(&mut self) {
+        self.blink_epoch += 1;
+        self.cursor_visible = true;
     }
 
     fn scroll_to_cursor(&mut self, window: &mut Window) {
@@ -210,6 +224,7 @@ impl TextInput {
     fn move_to(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
         self.scroll_to_cursor(window);
+        self.pause_blink();
         cx.notify()
     }
 
@@ -374,6 +389,7 @@ impl EntityInputHandler for TextInput {
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range.take();
         self.scroll_to_cursor(window);
+        self.pause_blink();
         cx.notify();
     }
 
@@ -563,7 +579,7 @@ impl Element for TextElement {
                         point(bounds.left() + cursor_pos, bounds.top()),
                         size(px(2.), bounds.bottom() - bounds.top()),
                     ),
-                    gpui::blue(),
+                    gpui::white(),
                 )),
             )
         } else {
@@ -616,6 +632,7 @@ impl Element for TextElement {
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()
+            && self.input.read(cx).cursor_visible
         {
             window.paint_quad(cursor);
         }
