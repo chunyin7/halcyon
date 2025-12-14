@@ -34,23 +34,19 @@ fn main() {
             .expect("failed to register global hotkey");
         let receiver = GlobalHotKeyEvent::receiver().clone();
         let panel_for_hotkey = panel.clone();
-        cx.spawn({
-            let panel = panel_for_hotkey;
-            let receiver = receiver;
-            move |cx: &mut AsyncApp| {
-                let mut cx = cx.clone();
-                async move {
-                    loop {
-                        while let Ok(event) = receiver.try_recv() {
-                            if event.state == HotKeyState::Pressed {
-                                let _ = panel.update(&mut cx, |panel, cx| panel.toggle(cx));
-                            }
-                        }
 
-                        cx.background_executor()
-                            .timer(Duration::from_millis(20))
-                            .await;
+        cx.spawn({
+            async move |cx: &mut AsyncApp| {
+                loop {
+                    while let Ok(event) = receiver.try_recv() {
+                        if event.state == HotKeyState::Pressed {
+                            let _ = panel_for_hotkey.update(cx, |panel, cx| panel.toggle(cx));
+                        }
                     }
+
+                    cx.background_executor()
+                        .timer(Duration::from_millis(20))
+                        .await;
                 }
             }
         })

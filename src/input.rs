@@ -80,6 +80,10 @@ impl TextInput {
         }
     }
 
+    pub fn content(&self) -> &SharedString {
+        &self.content
+    }
+
     pub fn toggle_cursor(&mut self) {
         self.cursor_visible = !self.cursor_visible;
     }
