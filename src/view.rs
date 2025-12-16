@@ -1,4 +1,4 @@
-use std::{sync::mpsc::Sender, time::Duration};
+use std::{path::PathBuf, sync::mpsc::Sender, time::Duration};
 
 use gpui::{
     App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement,
@@ -28,30 +28,38 @@ pub struct SearchQuery {
 
 struct CurrentQuery {
     q: Retained<NSMetadataQuery>,
-    tx: oneshot::Sender<Vec<NSMetadataItem>>,
+    tx: oneshot::Sender<SearchResponse>,
 }
 
-struct SearchItem;
+struct SearchItem {
+    name: String,
+    path: PathBuf,
+};
 
-pub struct SearchResponse;
+pub struct SearchResponse {
+    results: Vec<SearchItem>,
+};
 
 impl View {
     pub fn new(cx: &mut App) -> Self {
         let (query_tx, query_rx) = std::sync::mpsc::channel::<SearchQuery>();
 
         cx.background_spawn(async move {
-            let mut cur: Option<Retained<NSMetadataQuery>> = None;
+            let mut cur: Option<CurrentQuery> = None;
 
             loop {
                 if let Ok(query) = query_rx.try_recv() {
                     if let Some(cur) = cur.take() {
-                        unsafe { cur.stopQuery() };
+                        unsafe { cur.q.stopQuery() };
                     }
 
                     let SearchQuery { query , response_tx } = query;
                     let search_query = NSString::from_str(query.as_str());
 
-                    cur = Some(unsafe { NSMetadataQuery::new() });
+                    cur = Some(CurrentQuery {
+                        q: unsafe { NSMetadataQuery::new() },
+                        tx: response_tx,
+                    });
                     let format = NSString::from_str(
                         "kMDItemDisplayName LIKE %@, kMDItemContentType == \"com.apple.application\"",
                     );
@@ -65,22 +73,39 @@ impl View {
                     };
                     if let Some(query) = cur.as_mut() {
                         unsafe {
-                            query.setPredicate(Some(predicate.as_ref()));
-                            query.startQuery();
+                            query.q.setPredicate(Some(predicate.as_ref()));
+                            query.q.startQuery();
                         };
                     }
                 }
 
                 if let Some(cur) = cur.take() {
-                    if !unsafe { cur.isGathering() } {
-                        let results = unsafe { cur.results() };
-                        let ret: Vec<SearchItem> = results.iter().map(|item| {
+                    let CurrentQuery { q, tx } = cur;
+                    if !unsafe { q.isGathering() } {
+                        let results = unsafe { q.results() };
+                        let results: Vec<SearchItem> = results.iter().map(|item| {
                             let item: &NSMetadataItem = item.downcast_ref().unwrap();
-                            let path = unsafe { item.valueForAttribute(NSMetadataItemPathKey).unwrap() };
-                            let name = unsafe { item.valueForAttribute(NSMetadataItemDisplayNameKey).unwrap() };
+                            let path = unsafe {
+                                item.valueForAttribute(NSMetadataItemPathKey).unwrap()
+                            }
+                            .downcast_ref::<NSString>()
+                            .unwrap()
+                            .to_string();
+                            let path = PathBuf::from(path);
+                            let name = unsafe {
+                                item.valueForAttribute(NSMetadataItemDisplayNameKey).unwrap()
+                            }
+                            .downcast_ref::<NSString>()
+                            .unwrap()
+                            .to_string();
 
-                            SearchItem
+                            SearchItem {
+                                path,
+                                name,
+                            }
                         }).collect();
+
+                        tx.send(SearchResponse { results }).unwrap();
                     }
                 }
             }
