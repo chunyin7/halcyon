@@ -2,8 +2,8 @@ use std::{path::PathBuf, sync::mpsc::Sender, time::Duration};
 
 use gpui::{
     App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyDownEvent, ParentElement, Render, ScrollHandle, StatefulInteractiveElement,
-    Styled, WeakEntity, Window, div, hsla,
+    IntoElement, KeyDownEvent, ParentElement, Render, ScrollHandle, Size,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, hsla, px,
 };
 use objc2::rc::Retained;
 use objc2_foundation::{
@@ -11,7 +11,7 @@ use objc2_foundation::{
     NSPredicate, NSString,
 };
 
-use crate::input::TextInput;
+use crate::{input::TextInput, panel::Panel};
 
 pub struct View {
     cur_idx: usize,
@@ -34,14 +34,18 @@ struct CurrentQuery {
 struct SearchItem {
     name: String,
     path: PathBuf,
-};
+}
 
 pub struct SearchResponse {
     results: Vec<SearchItem>,
-};
+}
 
 impl View {
-    pub fn new(cx: &mut App) -> Self {
+    pub fn is_input_empty(&self, cx: &App) -> bool {
+        self.input.read(cx).content().is_empty()
+    }
+
+    pub fn new(cx: &mut App, window: &Window) -> Self {
         let (query_tx, query_rx) = std::sync::mpsc::channel::<SearchQuery>();
 
         cx.background_spawn(async move {
@@ -112,39 +116,55 @@ impl View {
         })
         .detach();
 
+        let input = cx.new(|cx| {
+            let input = TextInput::new(cx);
+            cx.spawn(|this: WeakEntity<TextInput>, cx: &mut AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    loop {
+                        let epoch = this
+                            .update(&mut cx, |input, _| input.blink_epoch)
+                            .unwrap_or(0);
+                        cx.background_executor()
+                            .timer(Duration::from_millis(500))
+                            .await;
+
+                        match this.update(&mut cx, |input, cx| {
+                            if epoch == input.blink_epoch {
+                                input.toggle_cursor();
+                                cx.notify();
+                            }
+                        }) {
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
+                    }
+                }
+            })
+            .detach();
+            input
+        });
+
+        let window_handle = window.window_handle();
+        cx.observe(&input, move |input, cx| {
+            if !input.read(cx).content().is_empty() {
+                let _ = window_handle.update(cx, |_view, window, _cx| {
+                    window.resize(Size::new(px(Panel::WIDTH), px(Panel::EXPANDED_HEIGHT)));
+                });
+            } else {
+                let _ = window_handle.update(cx, |_view, window, _cx| {
+                    window.resize(Size::new(px(Panel::WIDTH), px(Panel::HEIGHT)));
+                });
+            }
+        })
+        .detach();
+
         Self {
             cur_idx: 0,
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
             query_tx,
-            input: cx.new(|cx| {
-                let input = TextInput::new(cx);
-                cx.spawn(|this: WeakEntity<TextInput>, cx: &mut AsyncApp| {
-                    let mut cx = cx.clone();
-                    async move {
-                        loop {
-                            let epoch = this
-                                .update(&mut cx, |input, _| input.blink_epoch)
-                                .unwrap_or(0);
-                            cx.background_executor()
-                                .timer(Duration::from_millis(500))
-                                .await;
-
-                            match this.update(&mut cx, |input, cx| {
-                                if epoch == input.blink_epoch {
-                                    input.toggle_cursor();
-                                    cx.notify();
-                                }
-                            }) {
-                                Ok(_) => {}
-                                Err(_) => break,
-                            }
-                        }
-                    }
-                })
-                .detach();
-                input
-            }),
+            input,
         }
     }
 }

@@ -12,8 +12,9 @@ pub struct Panel {
 }
 
 impl Panel {
-    const WIDTH: f32 = 650.0;
-    const HEIGHT: f32 = 75.0;
+    pub const WIDTH: f32 = 650.0;
+    pub const HEIGHT: f32 = 75.0;
+    pub const EXPANDED_HEIGHT: f32 = 300.0;
 
     pub fn new(cx: &mut App) -> Self {
         let window = Self::open_window(cx);
@@ -61,9 +62,9 @@ impl Panel {
                     },
                     ..Default::default()
                 },
-                move |_window, cx| {
+                move |window, cx| {
                     cx.new(|cx| {
-                        let view = View::new(cx);
+                        let view = View::new(cx, window);
                         view
                     })
                 },
